@@ -1,0 +1,9 @@
+.idea/*
+.venv/
+.env
+.opeproject/
+__pycache__/
+*.log
+target/
+dbt_packages/
+logs/*
