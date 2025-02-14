@@ -3,3 +3,5 @@ apache-airflow-providers-amazon==9.2.0
 apache-airflow-providers-snowflake==5.5.0
 dbt-core==1.9.2
 dbt-snowflake==1.9.1
+Requests==2.32.3
+urllib3==2.3.0
