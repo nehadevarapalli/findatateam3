@@ -241,12 +241,8 @@ with DAG(
 
     # Define task dependencies
     check_tables_existence >> decide_next_step
-    decide_next_step >> proceed_with_next_task >> create_missing_tables>>insert_balance_sheet>>insert_income_statement>>insert_cash_flow# Proceed first, then create tables
+    decide_next_step >> proceed_with_next_task >> create_missing_tables>>insert_balance_sheet>>insert_income_statement>>insert_cash_flow
     decide_next_step >> no_required_tables_found 
 
     
-
-    # Define task dependencies
-    #check_tables_existence >> decide_next_step
-    #decide_next_step >> [proceed_with_next_task, no_required_tables_found]  # Branching logic
 
