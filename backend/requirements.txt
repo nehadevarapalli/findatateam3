@@ -1,1 +1,5 @@
 fastapi[standard]
+dotenv
+sqlalchemy
+snowflake-sqlalchemy
+snowflake-connector-python
