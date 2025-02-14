@@ -3,6 +3,7 @@ from airflow.hooks.base import BaseHook
 from airflow.utils.trigger_rule import TriggerRule
 from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.operators.empty import EmptyOperator
 from datetime import datetime, timedelta
@@ -25,6 +26,9 @@ AWS_CONN_ID = 'aws_default'
 BUCKET_NAME = 'findata-test'
 BASE_S3_KEY = 'sec_data/raw/{year}_Q{quarter}/'
 REQUIRED_FILES = ['sub.txt', 'num.txt', 'pre.txt', 'tag.txt']
+
+DBT_PROJECT_DIR = "/opt/airflow/dags/dbt/findatateam3"
+DBT_PROFILES_DIR = "/home/airflow/.dbt"
 
 default_args = {
     'owner': 'findata_team',
@@ -375,6 +379,28 @@ with DAG(
         trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
     )
 
+    dbt_run_task = BashOperator(
+        task_id='dbt_run',
+        bash_command=f"""
+            cd {DBT_PROJECT_DIR} &&
+            dbt run --profiles-dir {DBT_PROFILES_DIR} \
+                    --vars '{{"year": {{{{ params.year }}}}, "quarter": {{{{ params.quarter }}}}}}' \
+                    --target dev
+        """,
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
+    )
+
+    dbt_test_task = BashOperator(
+        task_id='dbt_test',
+        bash_command=f"""
+            cd {DBT_PROJECT_DIR} &&
+            dbt test --profiles-dir {DBT_PROFILES_DIR} \
+                     --vars '{{"year": {{{{ params.year }}}}, "quarter": {{{{ params.quarter }}}}}}' \
+                     --target dev
+        """,
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
+    )
+
     cleanup_task = PythonOperator(
         task_id='cleanup_local_files',
         python_callable=cleanup_local_files,
@@ -385,8 +411,8 @@ with DAG(
         trigger_rule=TriggerRule.ALL_DONE
     )
 
-    branch_task >> skip_processing_task >> cleanup_task
+    branch_task >> skip_processing_task >> dbt_run_task >> dbt_test_task >> cleanup_task
 
-    branch_task >> process_snowflake_task >> create_schema_and_tables_task >> load_data_task >> cleanup_task
+    branch_task >> process_snowflake_task >> create_schema_and_tables_task >> load_data_task >> dbt_run_task  >> dbt_test_task >> cleanup_task
 
-    branch_task >> process_full_pipeline_task >> download_task >> upload_task >> create_schema_and_tables_task >> load_data_task >> cleanup_task
+    branch_task >> process_full_pipeline_task >> download_task >> upload_task >> create_schema_and_tables_task >> load_data_task >> dbt_run_task >> dbt_test_task >> cleanup_task
