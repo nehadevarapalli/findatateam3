@@ -1,8 +1,10 @@
 from airflow import DAG
 from airflow.hooks.base import BaseHook
+from airflow.utils.trigger_rule import TriggerRule
 from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.empty import EmptyOperator
 from datetime import datetime, timedelta
 import requests
 from requests.adapters import HTTPAdapter
@@ -193,10 +195,6 @@ def download_and_extract(**kwargs):
     year = params.get('year', 2023)
     quarter = params.get('quarter', 4)
     
-    if are_all_files_in_s3(BUCKET_NAME, BASE_S3_KEY.format(year=year, quarter=quarter), AWS_CONN_ID, REQUIRED_FILES):
-        print(f"All files for {year}Q{quarter} already exist in S3. Skipping download.")
-        return
-    
     try:
         content = download_with_retry(year, quarter)
         output_dir = f'/data/{year}_Q{quarter}'
@@ -217,10 +215,6 @@ def upload_all_files_to_s3(**kwargs):
     params = kwargs['params']
     year = params.get('year', 2023)
     quarter = params.get('quarter', 4)
-
-    if are_all_files_in_s3(BUCKET_NAME, BASE_S3_KEY.format(year=year, quarter=quarter), AWS_CONN_ID, REQUIRED_FILES):
-        print("All files already exist in S3. Skipping upload.")
-        return
     
     local_dir = f'/data/{year}_Q{quarter}/'
     s3_hook = S3Hook(AWS_CONN_ID)
@@ -240,8 +234,31 @@ def does_table_exist(database, schema, table):
     """
     
     snowflake_hook = SnowflakeHook(SNOWFLAKE_CONN_ID)
-    result = snowflake_hook.get_first(query)
-    return result[0] > 0
+    try:
+        result = snowflake_hook.get_first(query)
+        return result[0] > 0
+    except Exception as e:
+        print(f"Error checking if table exists: {e}")
+        print(f"Assuming table {table_name} does not exist.")
+        return False
+
+def decide_branch(**kwargs):
+    params = kwargs['params']
+    year = params.get('year', 2023)
+    quarter = params.get('quarter', 4)
+    
+    schema_name = f"STAGING_{year}_Q{quarter}"
+    
+    if does_table_exist('FINDATA_RAW', schema_name, 'RAW_SUB'):
+        print(f"Data for {year}Q{quarter} already exists in Snowflake. Skipping data load.")
+        return 'skip_processing'
+    
+    if are_all_files_in_s3(BUCKET_NAME, BASE_S3_KEY.format(year=year, quarter=quarter), AWS_CONN_ID, REQUIRED_FILES):
+        print(f"All files for {year}Q{quarter} already exist in S3. Proceeding with Snowflake tasks.")
+        return 'process_snowflake'
+    
+    print(f"Files for {year}Q{quarter} do not exist in S3. Proceeding with full pipeline.")
+    return 'process_full_pipeline'
 
 def create_schema_and_tables(**kwargs):
     params = kwargs['params']
@@ -254,6 +271,7 @@ def create_schema_and_tables(**kwargs):
 
     sql_1 = CREATE_DATABASE_AND_SCHEMA.format(schema_name=schema_name, aws_key_id=aws_key_id, aws_secret_key=aws_secret_key)
     sql_2 = CREATE_TABLES.format(schema_name=schema_name)
+    
     snowflake_hook = SnowflakeHook(SNOWFLAKE_CONN_ID)
     snowflake_hook.run(sql_1)
     snowflake_hook.run(sql_2)
@@ -264,10 +282,6 @@ def load_data_if_needed(**kwargs):
     quarter = params.get('quarter', 4)
 
     schema_name = f"STAGING_{year}_Q{quarter}"
-    
-    if does_table_exist('FINDATA_RAW', schema_name, 'RAW_SUB'):
-        print(f"Data for {year}Q{quarter} already exists in Snowflake. Skipping data load.")
-        return
     
     sql = COPY_INTO_TABLES.format(schema_name=schema_name, year=year, quarter=quarter)
     snowflake_hook = SnowflakeHook(SNOWFLAKE_CONN_ID)
@@ -285,6 +299,27 @@ with DAG(
     }
 ) as dag:
     
+    branch_task = BranchPythonOperator(
+        task_id='decide_branch',
+        python_callable=decide_branch,
+        op_kwargs={
+            'year': '{{ params.year }}',
+            'quarter': '{{ params.quarter }}'
+        }
+    )
+
+    skip_processing_task = EmptyOperator(
+        task_id='skip_processing'
+    )
+
+    process_snowflake_task = EmptyOperator(
+        task_id='process_snowflake'
+    )
+
+    process_full_pipeline_task = EmptyOperator(
+        task_id='process_full_pipeline'
+    )
+
     download_task = PythonOperator(
         task_id='download_and_extract_data',
         python_callable=download_and_extract,
@@ -309,7 +344,8 @@ with DAG(
         op_kwargs={
             'year': '{{ params.year }}',
             'quarter': '{{ params.quarter }}',
-        }
+        },
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
     )
 
     load_data_task = PythonOperator(
@@ -318,7 +354,12 @@ with DAG(
         op_kwargs={
             'year': '{{ params.year }}',
             'quarter': '{{ params.quarter }}',
-        }
+        },
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
     )
 
-    download_task >> upload_task >> create_schema_and_tables_task >> load_data_task
+    branch_task >> skip_processing_task
+
+    branch_task >> process_snowflake_task >> create_schema_and_tables_task >> load_data_task
+
+    branch_task >> process_full_pipeline_task >> download_task >> upload_task >> create_schema_and_tables_task >> load_data_task
