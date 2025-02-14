@@ -13,6 +13,7 @@ import zipfile
 import io
 import os
 import time
+import shutil
 
 SEC_URL_TEMPLATE = "https://www.sec.gov/files/dera/data/financial-statement-data-sets/{year}q{quarter}.zip"
 USER_AGENT = "Findata Academic Project devarapalli.n@northeastern.edu"
@@ -287,6 +288,22 @@ def load_data_if_needed(**kwargs):
     snowflake_hook = SnowflakeHook(SNOWFLAKE_CONN_ID)
     snowflake_hook.run(sql)
 
+def cleanup_local_files(**kwargs):
+    """Cleanup local files generated during the pipeline execution."""
+    params = kwargs['params']
+    year = params.get('year', 2023)
+    quarter = params.get('quarter', 4)
+    
+    local_dir = f'/data/{year}_Q{quarter}/'
+    try:
+        if os.path.exists(local_dir):
+            shutil.rmtree(local_dir)
+            print(f"Deleted local directory {local_dir}")
+        else:
+            print(f"Local directory {local_dir} does not exist")
+    except Exception as e:
+        print(f"Error cleaning up local files: {e}")
+
 with DAG(
     'sec_data_pipeline',
     default_args=default_args,
@@ -358,8 +375,18 @@ with DAG(
         trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
     )
 
-    branch_task >> skip_processing_task
+    cleanup_task = PythonOperator(
+        task_id='cleanup_local_files',
+        python_callable=cleanup_local_files,
+        op_kwargs={
+            'year': '{{ params.year }}',
+            'quarter': '{{ params.quarter }}',
+        },
+        trigger_rule=TriggerRule.ALL_DONE
+    )
 
-    branch_task >> process_snowflake_task >> create_schema_and_tables_task >> load_data_task
+    branch_task >> skip_processing_task >> cleanup_task
 
-    branch_task >> process_full_pipeline_task >> download_task >> upload_task >> create_schema_and_tables_task >> load_data_task
+    branch_task >> process_snowflake_task >> create_schema_and_tables_task >> load_data_task >> cleanup_task
+
+    branch_task >> process_full_pipeline_task >> download_task >> upload_task >> create_schema_and_tables_task >> load_data_task >> cleanup_task
