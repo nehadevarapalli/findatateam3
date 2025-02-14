@@ -79,8 +79,7 @@ CREATE OR REPLACE TABLE FINDATA_RAW.STAGING.RAW_SUB (
     DETAIL BOOLEAN,
     INSTANCE STRING,
     NCIKS INTEGER,
-    ACIKS STRING,
-    LOAD_TIMESTAMP TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+    ACIKS STRING
 );
 
 -- NUM table
@@ -88,13 +87,13 @@ CREATE OR REPLACE TABLE FINDATA_RAW.STAGING.RAW_NUM (
     ADSH STRING,
     TAG STRING,
     VERSION STRING,
-    COREG NUMERIC,
     DDATE STRING,
     QTRS NUMERIC,
     UOM STRING,
-    VALUE NUMERIC,
-    FOOTNOTE STRING,
-    LOAD_TIMESTAMP TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+    SEGMENTS STRING,
+    COREG NUMERIC,
+    VALUE STRING,
+    FOOTNOTE STRING
 );
 
 -- PRE table
@@ -108,7 +107,7 @@ CREATE OR REPLACE TABLE FINDATA_RAW.STAGING.RAW_PRE (
     TAG STRING,
     VERSION STRING,
     PLABEL STRING,
-    LOAD_TIMESTAMP TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+    NEGATING BOOLEAN
 );
 
 -- TAG table
@@ -121,20 +120,23 @@ CREATE OR REPLACE TABLE FINDATA_RAW.STAGING.RAW_TAG (
     IORD STRING,
     CRDR STRING,
     TLABEL STRING,
-    DOC STRING,
-    LOAD_TIMESTAMP TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+    DOC STRING
 );
 """
 
 COPY_INTO_TABLES  = """
 COPY INTO FINDATA_RAW.STAGING.RAW_SUB FROM
-@FINDATA_RAW.STAGING.SEC_STAGE/{year}_Q{quarter}/sub.txt;
+@FINDATA_RAW.STAGING.SEC_STAGE/{year}_Q{quarter}/sub.txt
+ON_ERROR = 'CONTINUE';
 COPY INTO FINDATA_RAW.STAGING.RAW_NUM FROM
-@FINDATA_RAW.STAGING.SEC_STAGE/{year}_Q{quarter}/num.txt;
+@FINDATA_RAW.STAGING.SEC_STAGE/{year}_Q{quarter}/num.txt
+ON_ERROR = 'CONTINUE';
 COPY INTO FINDATA_RAW.STAGING.RAW_PRE FROM
-@FINDATA_RAW.STAGING.SEC_STAGE/{year}_Q{quarter}/pre.txt;
+@FINDATA_RAW.STAGING.SEC_STAGE/{year}_Q{quarter}/pre.txt
+ON_ERROR = 'CONTINUE';
 COPY INTO FINDATA_RAW.STAGING.RAW_TAG FROM
-@FINDATA_RAW.STAGING.SEC_STAGE/{year}_Q{quarter}/tag.txt;
+@FINDATA_RAW.STAGING.SEC_STAGE/{year}_Q{quarter}/tag.txt
+ON_ERROR = 'CONTINUE';
 """
 
 def download_with_retry(year, quarter):
@@ -221,7 +223,7 @@ with DAG(
         filename='/data/{{ params.year }}_Q{{ params.quarter }}/sub.txt',
         dest_key='sec_data/raw/{{ params.year }}_Q{{ params.quarter }}/sub.txt',
         dest_bucket='findata-test',
-        replace=False,
+        replace=True,
         aws_conn_id='aws_default',
     )
 
@@ -230,7 +232,7 @@ with DAG(
         filename='/data/{{ params.year }}_Q{{ params.quarter }}/num.txt',
         dest_key='sec_data/raw/{{ params.year }}_Q{{ params.quarter }}/num.txt',
         dest_bucket='findata-test',
-        replace=False,
+        replace=True,
         aws_conn_id='aws_default',
     )
 
@@ -239,7 +241,7 @@ with DAG(
         filename='/data/{{ params.year }}_Q{{ params.quarter }}/pre.txt',
         dest_key='sec_data/raw/{{ params.year }}_Q{{ params.quarter }}/pre.txt',
         dest_bucket='findata-test',
-        replace=False,
+        replace=True,
         aws_conn_id='aws_default',
     )
 
@@ -248,7 +250,7 @@ with DAG(
         filename='/data/{{ params.year }}_Q{{ params.quarter }}/tag.txt',
         dest_key='sec_data/raw/{{ params.year }}_Q{{ params.quarter }}/tag.txt',
         dest_bucket='findata-test',
-        replace=False,
+        replace=True,
         aws_conn_id='aws_default',
     )
 
@@ -264,11 +266,11 @@ with DAG(
         sql=COPY_INTO_TABLES.format(year='{{ params.year }}', quarter='{{ params.quarter }}'),
     )
 
-    download_task >> create_db_and_schema >> create_tables >> copy_into_tables
+    download_task >> create_db_and_schema >> [
+        upload_sub_file_to_s3,
+        upload_num_file_to_s3,
+        upload_pre_file_to_s3,
+        upload_tag_file_to_s3
+    ] >> create_tables >> copy_into_tables
 
-    # [
-    #     upload_sub_file_to_s3,
-    #     upload_num_file_to_s3,
-    #     upload_pre_file_to_s3,
-    #     upload_tag_file_to_s3
-    # ] >> 
+    
