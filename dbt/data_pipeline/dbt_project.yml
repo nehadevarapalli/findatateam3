@@ -1,11 +1,8 @@
+config-version: 2
 
-# Name your project! Project names should contain only lowercase characters
-# and underscores. A good package name should reflect your organization's
-# name or the intended use of these models
 name: 'data_pipeline'
 version: '1.0.0'
 
-# This setting configures which "profile" dbt uses for this project.
 profile: 'data_pipeline'
 
 # These configurations specify where dbt should look for different types of files.
@@ -21,6 +18,7 @@ snapshot-paths: ["snapshots"]
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
+  - "logs"
 
 
 # Configuring models
@@ -31,11 +29,19 @@ clean-targets:         # directories to be removed by `dbt clean`
 # files using the `{{ config(...) }}` macro.
 models:
   data_pipeline:
-    # Config indicated by + and applies to all files under models/example/
+    +database: FINDATA_RAW
+    +schema: "STAGING_{{ var('year', 2023)|string }}_Q{{ var('quarter', 4)|string }}"
+    +quoting:
+      schema: true
     staging:
       +materialized: view
-      snowflake_warehouses: dbt_wh
+    intermediate:
+      +materialized: ephemeral
     marts:
       +materialized: table
-      snowflake_warehouses: dbt_wh
+
+
+vars:
+  year: 2023
+  quarter: 4
 

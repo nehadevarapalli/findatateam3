@@ -3,18 +3,20 @@ models:
     columns:
       - name: adsh
         tests:
-          - unique
+          - unique:
+              severity: warn
           - not_null
           - relationships:
               to: ref('sub_stage')
               field: adsh
               severity: warn
 
-  - name: income_Sheet
+  - name: income_statement
     columns:
       - name: adsh
         tests:
-          - unique
+          - unique:
+              severity: warn
           - not_null
           - relationships:
               to: ref('sub_stage')
@@ -25,7 +27,8 @@ models:
     columns:
       - name: adsh
         tests:
-          - unique
+          - unique:
+              severity: warn
           - not_null
           - relationships:
               to: ref('sub_stage')

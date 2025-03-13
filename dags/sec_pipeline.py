@@ -25,7 +25,7 @@ REQUIRED_FILES = ['sub.txt', 'num.txt', 'pre.txt', 'tag.txt']
 RETRY_DELAY = 60
 MAX_RETRIES = 3
 
-DBT_PROJECT_DIR = "/opt/airflow/dbt/findatateam3"
+DBT_PROJECT_DIR = "/opt/airflow/dbt/data_pipeline"
 DBT_PROFILES_DIR = "/home/airflow/.dbt"
 
 default_args = {
