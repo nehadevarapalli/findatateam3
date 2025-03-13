@@ -1,0 +1,57 @@
+version: 2
+
+models:
+  - name: sub_stg
+    description: Staging model for submission data
+    columns:
+      - name: submission_id
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('num_stg')
+              field: submission_id
+      
+      - name: cik
+        tests:
+          - not_null
+          
+      - name: fiscal_period
+        tests:
+          - accepted_values:
+              values: ['FY', 'Q1', 'Q2', 'Q3', 'Q4']
+
+  - name: num_stg
+    description: Staging model for numeric data
+    columns:
+      - name: submission_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('sub_stg')
+              field: submission_id
+
+  - name: tag_stg
+    description: Staging model for tag definitions
+    columns:
+      - name: tag
+        tests:
+          - not_null
+          
+      - name: taxonomy_version
+        tests:
+          - not_null
+          
+      - name: data_type
+        tests:
+          - accepted_values:
+              values: ['monetary', 'shares', 'perShare', 'pure', 'percent', 'integer', 'decimal', 'energy', 'volume', 'perUnit', 'mass']
+
+  - name: pre_stg
+    description: Staging model for presentation data
+    columns:
+      - name: submission_id
+        tests:
+          - relationships:
+              to: ref('sub_stg')
+              field: submission_id
