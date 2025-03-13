@@ -10,6 +10,9 @@ from sqlalchemy import create_engine
 app = FastAPI(title="FastAPI Backend", version="0.1.0")
 load_dotenv()
 
+class QueryRequest(BaseModel):
+    sql: str
+
 SNOWFLAKE_URL = (
     "snowflake://{user}:{password}@{account}/{db}/{schema}?{wh}={wh}&role={role}"
 ).format(
@@ -89,13 +92,15 @@ def get_airflow_dagruns(dag_id: str):
 
 
 @app.post("/snowflake/execute")
-def execute_snowflake_query(sql: str):
+def execute_snowflake_query(query: QueryRequest):
     """
     Execute a SQL query on Snowflake.
     """
     try:
         connection = engine.connect()
-        result = connection.execute(sql)
+        print("Successfully connected to Snowflake")
+        result = connection.execute(query.sql)
+        print("Successfully executed query")
         return result.fetchall()
     except Exception as e:
         return {"error": str(e)}

@@ -1,5 +1,4 @@
 from airflow import DAG
-from airflow.hooks.base import BaseHook
 from airflow.utils.trigger_rule import TriggerRule
 from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
@@ -7,27 +6,26 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.operators.empty import EmptyOperator
 from datetime import datetime, timedelta
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-import zipfile
-import io
 import os
-import time
+import sys
 import shutil
 
-SEC_URL_TEMPLATE = "https://www.sec.gov/files/dera/data/financial-statement-data-sets/{year}q{quarter}.zip"
-USER_AGENT = "Findata Academic Project devarapalli.n@northeastern.edu"
-MAX_RETRIES = 3
-RETRY_DELAY = 60 
+# Add scripts directory to path
+sys.path.append('/opt/airflow/dags/scripts/')
 
+# Import the scraping function
+from scripts.scrape_sec_data import scrape_sec_data
+
+# Constants
 SNOWFLAKE_CONN_ID = 'snowflake_default' 
 AWS_CONN_ID = 'aws_default'
 BUCKET_NAME = 'findata-test'
 BASE_S3_KEY = 'sec_data/raw/{year}_Q{quarter}/'
 REQUIRED_FILES = ['sub.txt', 'num.txt', 'pre.txt', 'tag.txt']
+RETRY_DELAY = 60
+MAX_RETRIES = 3
 
-DBT_PROJECT_DIR = "/opt/airflow/dags/dbt/findatateam3"
+DBT_PROJECT_DIR = "/opt/airflow/dbt/findatateam3"
 DBT_PROFILES_DIR = "/home/airflow/.dbt"
 
 default_args = {
@@ -154,45 +152,14 @@ ON_ERROR = 'CONTINUE';
 
 def get_aws_credentials(aws_conn_id):
     """Get AWS credentials from Airflow connection."""
-    conn = BaseHook.get_connection(aws_conn_id)
-    return conn.login, conn.password
+    s3_hook = S3Hook(aws_conn_id)
+    aws_credentials = s3_hook.get_credentials()
+    return aws_credentials.access_key, aws_credentials.secret_key
 
 def are_all_files_in_s3(bucket_name, s3_key, aws_conn_id, required_files):
     """Check if all required files exist in S3."""
     s3_hook = S3Hook(aws_conn_id)
     return all(s3_hook.check_for_key(s3_key + file, bucket_name) for file in required_files)
-
-def download_with_retry(year, quarter):
-    """Download SEC data with retries and SEC compliance."""
-    sec_url = SEC_URL_TEMPLATE.format(year=year, quarter=quarter)
-    session = requests.Session()
-    retries = Retry(total=MAX_RETRIES,
-                    backoff_factor=0.3,
-                    status_forcelist=[429, 500, 502, 503, 504],
-                    allowed_methods=frozenset(['GET']))
-    
-    session.mount('https://', HTTPAdapter(max_retries=retries))
-    session.headers.update({'User-Agent': USER_AGENT})
-
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            response = session.get(sec_url, timeout=30)
-            response.raise_for_status()
-            
-            # Validate ZIP header
-            if response.content[:4] != b'PK\x03\x04':
-                raise ValueError("Invalid ZIP file header")
-                
-            return response.content
-            
-        except requests.HTTPError as e:
-            if e.response.status_code == 429:
-                print(f"Rate limited. Retrying in {RETRY_DELAY} seconds...")
-                time.sleep(RETRY_DELAY * (attempt + 1))
-            else:
-                raise
-
-    raise Exception("Max retries exceeded")
 
 def download_and_extract(**kwargs):
     """Download and extract SEC data for a specific year and quarter if not already in S3."""
@@ -201,18 +168,12 @@ def download_and_extract(**kwargs):
     quarter = params.get('quarter', 4)
     
     try:
-        content = download_with_retry(year, quarter)
-        output_dir = f'/data/{year}_Q{quarter}'
-
-        with zipfile.ZipFile(io.BytesIO(content)) as zip_ref:
-            zip_ref.extractall(output_dir)
-            
-        print(f"Successfully downloaded and extracted SEC data for {year}Q{quarter}")
+        # Use the imported scrape_sec_data function
+        output_dir = scrape_sec_data(year, quarter)
+        print(f"Successfully downloaded and extracted SEC data for {year}Q{quarter} to {output_dir}")
         
-    except zipfile.BadZipFile:
-        print("Downloaded file is not a valid ZIP - possible rate limit page")
-        with open(f'/data/{year}_Q{quarter}_error.html', 'wb') as f:
-            f.write(content)
+    except Exception as e:
+        print(f"Error downloading SEC data: {e}")
         raise
 
 def upload_all_files_to_s3(**kwargs):

@@ -8,4 +8,4 @@ target/
 dbt_packages/
 logs/*
 data/*
-dags/.dbt/
+.dbt/
