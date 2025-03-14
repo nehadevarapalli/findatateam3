@@ -18,11 +18,12 @@ SELECT
     n.uom,
     n.segments,
     n.coreg,
-    n.value AS reported_value,
+    n.value,
     n.footnote,
     t.tag AS tag_stage_tag,  --Aliased to avoid duplication
     t.datatype,
     t.crdr,
+    t.abstract,
     s.fy,
     s.fp
 FROM num_stg n

@@ -1,4 +1,5 @@
 import streamlit as st
+import time
 import requests
 import pandas as pd
 import plotly_express as px
@@ -27,11 +28,10 @@ QUERIES = {
                 s.name AS company_name,
                 n.ddate AS report_date,
                 n.value AS revenue_value
-            FROM FINDATA_RAW.STAGING_{year}_Q{quarter}.RAW_NUM n
-            JOIN FINDATA_RAW.STAGING_{year}_Q{quarter}.RAW_SUB s ON n.adsh = s.adsh
-            JOIN FINDATA_RAW.STAGING_{year}_Q{quarter}.RAW_TAG t ON n.tag = t.tag
-            WHERE LOWER(n.tag) LIKE '%revenue%'
-            AND t.abstract = FALSE
+            FROM FINDATA_RAW.STAGING_{year}_Q{quarter}.NUM n
+            JOIN FINDATA_RAW.STAGING_{year}_Q{quarter}.SUB s ON n.adsh = s.adsh
+            WHERE LOWER(n.num_tag) LIKE '%revenue%'
+            AND n.abstract = FALSE
             AND n.value BETWEEN 0 AND 50000000  -- Filter for values between 0 and 50M
             ORDER BY s.name, n.ddate
             LIMIT 100
@@ -64,7 +64,7 @@ QUERIES = {
             JOIN FINDATA_RAW.STAGING_{year}_Q{quarter}.RAW_SUB s ON n.adsh = s.adsh
             LEFT JOIN FINDATA_RAW.REFERENCE.SIC_CODES sc ON s.sic = sc.SIC_CODE
             WHERE s.sic IS NOT NULL
-            GROUP BY industry_name
+            GROUP BY industry_name, sic
             ORDER BY company_count DESC
             LIMIT 10
         """,
@@ -133,6 +133,48 @@ def main():
         
     if st.sidebar.button("Generate Report"):
         with st.spinner("Analyzing financial data..."):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            try:
+                # Trigger Airflow DAG
+                dag_response = requests.post(
+                    f"{FASTAPI_URL}/airflow/rundag/sec_data_pipeline",
+                    json={"year": year, "quarter": quarter}
+                )
+                if dag_response.status_code != 200:
+                    st.error(f"Pipeline activation failed: {dag_response.text}")
+                    st.stop()
+
+                # Monitor DAG progress
+                dag_run_id = dag_response.json().get('dag_run_id')
+                progress = 0
+                while progress < 100:
+                    status_response = requests.get(
+                        f"{FASTAPI_URL}/airflow/rundag/sec_data_pipeline/{dag_run_id}"
+                    )
+                    if status_response.status_code != 200:
+                        st.error(f"Status check failed: {status_response.text}")
+                        st.stop()
+
+                    dag_status = status_response.json().get('state', 'running')
+                    if dag_status == 'success':
+                        progress = 100
+                        progress_bar.progress(progress)
+                        status_text.success("Processing complete!")
+                        break
+                    elif dag_status in ['failed', 'error']:
+                        st.error(f"Pipeline failed: {dag_status}")
+                        st.stop()
+                    else:
+                        progress = min(progress + 10, 90)
+                        progress_bar.progress(progress)
+                        status_text.text(f"Status: {dag_status}...")
+                        time.sleep(2)
+
+            except Exception as e:
+                st.error(f"Error triggering pipeline: {str(e)}")
+                st.stop()
+            
             # Fetch and display data
             df = get_data(selected_query, year, quarter)
 

@@ -26,7 +26,7 @@ SNOWFLAKE_URL = (
 )
 
 AIRFLOW_URL = "http://{airflow_host}/api/v1".format(
-    airflow_host=os.getenv("AIRFLOW_PUBLIC_IP", "localhost")
+    airflow_host=os.getenv("AIRFLOW_PUBLIC_IP", "localhost:8080")
 )
 
 engine = create_engine(SNOWFLAKE_URL)
