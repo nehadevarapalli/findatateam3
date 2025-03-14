@@ -1,11 +1,12 @@
 import streamlit as st
+import os
 import time
 import requests
 import pandas as pd
 import plotly_express as px
 from datetime import datetime
 
-FASTAPI_URL = "http://127.0.0.1:8000"  # Update with your FastAPI URL
+FASTAPI_URL = os.getenv("FASTAPI_URL");  # Update with your FastAPI URL
 
 QUERIES = {
     "company_filings": {
