@@ -132,8 +132,8 @@ def main():
     # Sidebar controls
     with st.sidebar:
         st.header("Filters")
-        year = "2023"
-        quarter = "Q4"
+        year = 2023
+        quarter = 4
         st.subheader(f"{year}_{quarter}")
         
         
