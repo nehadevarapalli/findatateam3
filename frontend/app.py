@@ -132,7 +132,10 @@ def main():
     # Sidebar controls
     with st.sidebar:
         st.header("Filters")
-        year = st.subheader("2023_Q4")
+        year = "2023"
+        quarter = "Q4"
+        st.subheader(f"{year}_{quarter}")
+        
         
         st.divider()
         selected_query = st.selectbox(
